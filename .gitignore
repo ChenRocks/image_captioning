@@ -1,0 +1,4 @@
+*.pyc
+workspace/
+embedding/
+__pycache__/
