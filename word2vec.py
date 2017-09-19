@@ -26,7 +26,11 @@ class Sentences:
 
     def __iter__(self):
         for ann in self._anns:
-            yield ann['caption'].strip().split(' ') + ['<\s>']
+            words = ann['caption'].lower().strip().split(' ')
+            if words[-1][-1] == '.':
+                words = words[:-1] + [words[-1][:-1]]
+            words = [w.strip() for w in words if w.strip()]
+            yield words + ['<\s>']
 
 
 def main(args):
@@ -67,7 +71,7 @@ def load_embedding_from_bin(bin_file, id2word):
 
     for i in range(vocab_size):
         if i == EOS:
-            embedding[i, :] = torch.from_numpy(w2v[u'<\s>'])
+            embedding[i, :] = torch.from_numpy(w2v['<\s>'])
         elif i == PAD:
             embedding[i, :].normal_(0, 1)
         elif id2word[i] in w2v:

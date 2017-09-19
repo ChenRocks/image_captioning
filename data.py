@@ -95,11 +95,19 @@ def batch_caption(id_caps):
 
 
 def get_imcap_collate_fn(word2id):
+    def split_caps(caps):
+        splited_caps = []
+        for cap in caps:
+            words = cap.lower().strip().split(' ')
+            if words[-1][-1] == '.':
+                words = words[:-1] + [words[-1][:-1]]
+            splited_caps.append([w.strip() for w in words if w.strip()])
+        return splited_caps
     def f(batches):
         imgs = [img for img, _ in batches]
-        id_caps = [[[word2id[w] for w in cap.strip().split(' ')]
-                    for cap in caps]
-                   for _, caps in batches]
+        cap_words = [split_caps(caps) for _, caps in batches]
+        id_caps = [[[word2id[w] for w in cap] for cap in caps]
+                   for caps in cap_words]
         ret =  list(zip(imgs, id_caps))
         assert(len(ret) > 0)
         assert(ret is not None)
@@ -108,8 +116,8 @@ def get_imcap_collate_fn(word2id):
 
 
 def coco_bucket_gen(loader, batch_size, bucket_size, word2id, max_cap_len):
-    sort_fn = lambda pair: len(pair[0])
-    for hyper_batch in loader:
+    sort_fn = lambda pair: len(pair[1])
+    for debug_i, hyper_batch in enumerate(loader):
         hyper_batch = [(im, c) for im, caps in hyper_batch for c in caps]
         hyper_batch = sorted(hyper_batch, key=sort_fn)
         indices = list(range(0, len(hyper_batch), batch_size))

@@ -1,5 +1,8 @@
 from __future__ import print_function
 
+import matplotlib
+matplotlib.use('Agg')
+
 import argparse
 import pickle as pkl
 import math
@@ -101,19 +104,23 @@ def validate(model, loader):
 def test(model, loader, id2word, max_len):
     st = time()
     model.eval()
-    result = []
-    for id_, img in loader:
+    results = []
+    vizs = {}
+    for i, (id_, img) in enumerate(loader):
+        print('{}\r'.format(i), end='')
         output, attns = model.decode(img, GO, EOS, max_len)
         d = {}
         d['image_id'] = id_
         d['caption'] = ' '.join([id2word[i] for i in output])
-        print('====================================')
-        print(id_)
-        print(d['caption'])
-        result.append(d)
+        vizs[id_] = torch.stack(attns).cpu().numpy()
+        #print('====================================')
+        #print(id_)
+        #print(d['caption'])
+        results.append(d)
+        results.append(d)
 
     print('finished in {:.0f} seconds\n'.format(time()-st))
-    return result
+    return results, vizs
 
 
 def decode(args):
@@ -127,12 +134,68 @@ def decode(args):
         word2id, args.max_len, args.batch_size,
         split='val', cuda=args.cuda)
     model.load_state_dict(torch.load(get_best_ckpt(args.dir)))
-    result = test(model, test_loader, id2word, args.max_len)
-    with open(join(__SAVE_PATH, join(args.dir, 'val/result.json')), 'w') as f:
-        json.dump(result, f)
+    results, vizs = test(model, test_loader, id2word, args.max_len)
+    save_path = join(join(__SAVE_PATH, args.dir), 'val')
+    if not exists(save_path):
+        os.makedirs(save_path)
+    with open(join(save_path, 'result.json'), 'w') as f:
+        json.dump(results, f)
+    with open(join(save_path, 'viz.pkl'), 'wb') as f:
+        pkl.dump(vizs, f, pkl.HIGHEST_PROTOCOL)
+
+
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import skimage
+import skimage.transform as transform
+from PIL import Image
+import numpy as np
+def plot_viz(img, cap, attn, path):
+    words = cap.split(' ')
+    n_words = len(words)
+    w = round(math.sqrt(n_words))
+    h = math.ceil(n_words / w)
+    fig = plt.figure()
+    plt.imshow(img)
+    plt.axis('off')
+    fig.savefig(join(path, 'img.png'))
+    plt.subplot(w, h, 1)
+    for i, a in enumerate(attn):
+        plt.subplot(w, h, i+1)
+        word = words[i]
+        plt.text(0, 1, word, backgroundcolor='white', fontsize=13)
+        plt.text(0, 1, word, color='black', fontsize=13)
+        plt.imshow(img)
+        alpha_img = transform.pyramid_expand(a,  upscale=32, sigma=20)
+        plt.imshow(alpha_img, alpha=0.8)
+        plt.set_cmap(cm.Greys_r)
+        plt.axis('off')
+    fig.savefig(join(path, 'viz.png'))
+
+
+from random import choice
+from torchvision.transforms import Scale, CenterCrop
+def visualize(path):
+    save_path = join(join(__SAVE_PATH, path), 'val')
+    with open(join(save_path, 'result.json'), 'r') as f:
+        results = json.load(f)
+    with open(join(save_path, 'viz.pkl'), 'rb') as f:
+        vizs = pkl.load(f)
+    result = choice(results)
+    result = results[0]
+    id_ = result['image_id']
+    cap = result['caption']
+    attn = vizs[id_]
+    img = Image.open('../data/coco/val2014/COCO_val2014_{0:012}.jpg'.format(id_))
+    img = CenterCrop(448)(Scale(512)(img))
+    save_path = join(__SAVE_PATH, path)
+    plot_viz(img, cap, attn, save_path)
 
 
 def main(args):
+    if not exists(join(__SAVE_PATH, args.dir)):
+        os.makedirs(join(__SAVE_PATH, args.dir))
+    os.makedirs(join(__SAVE_PATH, '{}/ckpt'.format(args.dir)))
     word2id, id2word = make_vocab(args.vsize)
     with open(join(__SAVE_PATH, join(args.dir, 'vocab.pkl')), 'wb') as f:
         pkl.dump((word2id, id2word), f, pkl.HIGHEST_PROTOCOL)
@@ -158,9 +221,6 @@ def main(args):
     scheduler = ReduceLROnPlateau(
         optimizer, mode='min', patience=0, factor=0.5, verbose=True)
 
-    if not exists(join(__SAVE_PATH, args.dir)):
-        os.makedirs(join(__SAVE_PATH, args.dir))
-    os.makedirs(join(__SAVE_PATH, '{}/ckpt'.format(args.dir)))
     meta = vars(args)
     with open(join(__SAVE_PATH, '{}/meta.json'.format(args.dir)), 'w') as f:
         json.dump(meta, f)
@@ -187,6 +247,7 @@ def main(args):
                 best_val = val_loss
                 patience = 0
             else:
+                print('val loss does not decrease')
                 patience += 1
             if patience > args.patience:
                 break
@@ -203,6 +264,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--decode', action='store_true')
+    parser.add_argument('--viz', action='store_true')
     parser.add_argument('--ckpt-size', type=int)
     parser.add_argument('--dir', required=True, metavar='DIR',
                         help='dir name to save')
@@ -236,8 +298,12 @@ if __name__ == '__main__':
                         help='random seed (default: 1)')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+    torch.backends.cudnn.benchmark = True
+    # image will be cropped to same size, run benchmark to speed up conv
     if args.decode:
         decode(args)
+    elif args.viz:
+        visualize(args.dir)
     else:
         main(args)
 
