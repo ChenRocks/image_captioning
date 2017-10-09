@@ -88,6 +88,8 @@ def validate(model, loader):
     model.eval()
     val_loss = 0
     n = 0
+    #for i in range(n_step):
+        #img, input_, target = next(loader)
     for img, input_, target in loader():
         output = model(img, input_)
         # sum up batch loss
@@ -117,7 +119,6 @@ def test(model, loader, id2word, max_len):
         #print(id_)
         #print(d['caption'])
         results.append(d)
-        results.append(d)
 
     print('finished in {:.0f} seconds\n'.format(time()-st))
     return results, vizs
@@ -131,11 +132,11 @@ def decode(args):
         model.cuda()
 
     test_loader = get_coco_test_iter(
-        word2id, args.max_len, args.batch_size,
-        split='val', cuda=args.cuda)
+        args.max_len, args.batch_size,
+        split=args.split, cuda=args.cuda)
     model.load_state_dict(torch.load(get_best_ckpt(args.dir)))
     results, vizs = test(model, test_loader, id2word, args.max_len)
-    save_path = join(join(__SAVE_PATH, args.dir), 'val')
+    save_path = join(join(__SAVE_PATH, args.dir), args.split)
     if not exists(save_path):
         os.makedirs(save_path)
     with open(join(save_path, 'result.json'), 'w') as f:
@@ -254,9 +255,9 @@ def main(args):
 
     print('training finished, run test set')
     test_loader = get_coco_test_iter(
-        word2id, args.max_len, args.batch_size, cuda=args.cuda)
+        args.max_len, args.batch_size, cuda=args.cuda)
     model.load_state_dict(torch.load(get_best_ckpt(args.dir)))
-    result = test(model, test_loader)
+    result = test(model, test_loader, id2word, args.max_len)
     with open(join(__SAVE_PATH, '{}/result.json'.format(args.dir)), 'w') as f:
         json.dump(result, f)
 
@@ -264,6 +265,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--decode', action='store_true')
+    parser.add_argument('--test', action='store_true')
     parser.add_argument('--viz', action='store_true')
     parser.add_argument('--ckpt-size', type=int)
     parser.add_argument('--dir', required=True, metavar='DIR',
@@ -284,8 +286,8 @@ if __name__ == '__main__':
                         help='maximum caption length (default: 20)')
     parser.add_argument('--opt', default='adam', metavar='OPT',
                         help='optimizer (default: Adam)')
-    parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
-                        help='learning rate (default: 0.001)')
+    parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
+                        help='learning rate (default: 0.0001)')
     parser.add_argument('--clip_grad', type=float, default=2.0, metavar='G',
                         help='gradient clipping (default: 2.0)')
     parser.add_argument('--ckpt_freq', type=int, default=3000, metavar='F',
@@ -298,13 +300,18 @@ if __name__ == '__main__':
                         help='random seed (default: 1)')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+    args.split = 'test' if args.test else 'val'
     torch.backends.cudnn.benchmark = True
     # image will be cropped to same size, run benchmark to speed up conv
     if args.decode:
+        import torch.multiprocessing as mp
+        mp.set_start_method('forkserver')
         decode(args)
     elif args.viz:
         visualize(args.dir)
     else:
+        import torch.multiprocessing as mp
+        mp.set_start_method('forkserver')
         main(args)
 
 
